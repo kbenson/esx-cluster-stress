@@ -1,0 +1,197 @@
+#!/usr/bin/env perl
+# Bootstrap extlib with FindBin so we can use local::lib in it
+use FindBin qw($Bin);
+use lib "$Bin/./extlib";
+use local::lib './extlib';
+use local::lib './lib';
+
+use Mojolicious::Lite;
+use Crypt::Digest qw(digest_data_hex);
+use DBD::SQLite;
+use Time::HiRes;
+
+my $DEFAULT_DIGEST_TYPE= 'SHA512';
+my @ALLOWED_DIGEST_TYPES = ( # From Crypt::Digest
+    'CHAES', 'MD2', 'MD4', 'MD5', 'RIPEMD128', 'RIPEMD160',
+    'RIPEMD256', 'RIPEMD320', 'SHA1', 'SHA224', 'SHA256',
+    'SHA384', 'SHA512', 'SHA512_224', 'SHA512_256', 'Tiger192', 'Whirlpool',
+    'SHA3_224', 'SHA3_256', 'SHA3_384', 'SHA3_512',
+    'BLAKE2b_160', 'BLAKE2b_256', 'BLAKE2b_384', 'BLAKE2b_512',
+    'BLAKE2s_128', 'BLAKE2s_160', 'BLAKE2s_224', 'BLAKE2s_256'
+);
+
+# read %0.conf as perl hash for conif
+my $config = app->plugin('Config');
+
+sub get_dbh {
+    die "Not a controller!" unless $config->{role}{controller};
+    state $time = time;
+    my $dbfile = $config->{dbfile} || "registry.sqlite";
+    $dbfile = "$Bin/$dbfile" unless substr($dbfile,0,1) eq '/';
+    my $dbh = DBI->connect("dbi:SQLite:dbname=$dbfile","","", {
+        AutoCommit => 1,
+        RaiseError => 1,
+    });
+}
+
+
+helper randstr => sub {
+    my $c = shift;
+    my $numchars = shift || 8;
+    my @set = ('0' ..'9', 'a' .. 'f', 'A' .. 'F');
+    return join '' => map $set[rand @set], 1 .. $numchars;
+};
+
+helper server => sub {
+    my $c = shift;
+    my $a = shift || 'UNSET';
+    my $ip = shift || $c->tx->remote_address;
+    my $dbh = get_dbh();
+    my $q = $a eq 'ADD'    ? "INSERT OR REPLACE INTO servers (ip,seen) VALUES (?,CURRENT_TIMESTAMP)"
+          : $a eq 'REMOVE' ? "DELETE FROM servers WHERE ip = ?"
+          : die "Unknown server action: " . substr($a,0,10);
+    my $sth = $dbh->prepare($q) or die $dbh->errstr;
+    return $sth->execute($ip) or die $dbh->errstr;
+};
+
+helper server_dump => sub {
+    my $c = shift;
+    use Data::Dumper;
+    my $dbh = get_dbh();
+    my $select = q[
+        SELECT * FROM servers
+        WHERE seen > datetime(CURRENT_TIMESTAMP,'-2 MINUTES');
+    ];
+    return $dbh->selectall_arrayref($select, { Slice=>{} });
+};
+
+get '/' => sub {
+    my $c = shift;
+    $c->render(template => 'index');
+};
+
+get '/registration' => sub {
+    my $c = shift;
+    my $action = uc( $c->param('action') );
+    # Set X-Forwarded-For and X-Forwarded-Proto in proxying server if needed
+    my $ip = $c->param('ip') || $c->tx->remote_address;
+    $c->server($action,$ip);
+    return $c->render(text => "Action $action $ip completed");
+};
+
+get '/servers' => sub {
+    my $c = shift;
+    my $data = $c->server_dump;
+    return $c->respond_to(
+        json => { json => $data },
+        text => sub { $c->render(text=>join ",", map { $_->{ip} } @$data) },
+        any => sub { $c->render(text=>join "\n", map { "IP: $_->{ip}, Seen: $_->{seen}" } @$data) },
+    );
+};
+
+get '/digest' => sub {
+    my $c = shift;
+    my $type      = uc( $c->param('type') || $DEFAULT_DIGEST_TYPE );
+    $type = $DEFAULT_DIGEST_TYPE unless grep { $type eq $_ } @ALLOWED_DIGEST_TYPES;
+    my $generate  = $c->param('generate') || 1;
+    my $want      = $c->param('want') || 1; # Can generate more than we return
+    my @data = map { digest_data_hex($type, $c->randstr) } (1 .. $generate);
+    my $alldata = join "\n", map { "DIGEST $type ENTRY $_\n" . $data[ $_ % @data ] . "\n" } (1 .. $want);
+
+    $c->render(text => $alldata);
+};
+
+
+# STARTUP
+my $ua = Mojo::UserAgent->new;
+$ua->request_timeout(10);
+
+if ( $config->{role}{controller} ) {
+    get_dbh->do("CREATE TABLE IF NOT EXISTS servers ( ip TEXT PRIMARY KEY, seen TEXT NOT NULL );")
+        or die "Error creating tables";
+}
+
+if ( $config->{role}{server} ) {
+    my $checkin_task = sub {
+        my $loop = shift;
+        my $url = "$config->{controller}/registration?action=add";
+        app->log->info("CHECKIN STARTED $url");
+        $ua->get($url => sub {
+            my ($ua,$tx) = @_;
+            my $code = $tx->result->code;
+            my $text = $tx->result->body;
+            app->log->info("CHECKIN COMPLETE($code) $url = \"$text\"");
+        });
+    };
+
+    # Initial and recurring checkins
+    Mojo::IOLoop->timer(5 => $checkin_task );
+    Mojo::IOLoop->recurring( 60 => $checkin_task );
+}
+
+if ( $config->{role}{client} ) {
+    my @SERVERS = ();
+    my $servers_update_task = sub {
+        my $loop = shift;
+        my $url = "$config->{controller}/servers.text";
+        app->log->info("UPDATING SERVER LIST $url");
+        $ua->get($url => sub {
+            my ($ua,$tx) = @_;
+            my $text = $tx->result->body;
+            if ( $text =~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(,|$)/ ) {
+                @SERVERS = split /,/, $text;
+                app->log->info("UPDATED SERVER LIST " . join(",",@SERVERS));
+            } else {
+                app->log->info("ERROR UPDATING SERVER LIST");
+            }
+        });
+    };
+
+    Mojo::IOLoop->timer(2 => $servers_update_task );
+    Mojo::IOLoop->recurring( 60 => $servers_update_task );
+
+    my $client_request_task = sub {
+        my $loop = shift;
+        #app->log->info("SERVERLIST " . join(',',@SERVERS));
+        return schedule_client_request(1) unless @SERVERS;
+        my $server = $SERVERS[rand @SERVERS];
+        my $url = "$server/digest?generate=10000&want=10000";
+        app->log->info("CLIENT REQUEST $url");
+        my $req_start = Time::HiRes::time;
+        $ua->get($url => sub {
+            my ($ua,$tx) = @_;
+            my $length = length $tx->result->body;
+            my $req_time = Time::HiRes::time - $req_start;
+            app->log->info(sprintf "CLIENT RESPONSE LENGTH %s TIME %0.2f", $length, $req_time);
+        });
+        schedule_client_request(0);
+    };
+
+    sub schedule_client_request {
+        my $delay = shift || 0;
+        Mojo::IOLoop->timer($delay => $client_request_task);
+    };
+
+    schedule_client_request(5);
+}
+
+# Start the mojo app
+app->start;
+
+
+__DATA__
+
+@@ index.html.ep
+% layout 'default';
+% title 'ESX Cluster Stress';
+<h1>Choose an option</h1>
+
+@@ layouts/default.html.ep
+<!DOCTYPE html>
+<html>
+  <head><title><%= title %></title></head>
+  <body>
+    <%= content %>
+    <a href="/report">Report</a>
+  </body>
+</html>

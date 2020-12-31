@@ -1,0 +1,13 @@
+#!/bin/env perl
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use lib "$Bin/./extlib";
+use local::lib './extlib';
+use local::lib './lib';
+
+$ENV{HYPNOTOAD_STOP} = 1 if ($ARGV[0]//'') eq 'stop';
+use Mojo::Server::Hypnotoad;
+Mojo::Server::Hypnotoad->new->run("$Bin/esx-cluster-stress-httpd");
+

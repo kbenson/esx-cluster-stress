@@ -1,0 +1,7 @@
+# Built at installation.
+extlib/
+
+# Runtime files
+hypnotoad.pid
+log/
+registry.sqlite

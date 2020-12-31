@@ -3,9 +3,9 @@
 use strict;
 use warnings;
 use FindBin qw($Bin);
-use lib "$Bin/./extlib";
-use local::lib './extlib';
-use local::lib './lib';
+use lib "$Bin/extlib/lib/perl5";
+use local::lib "$Bin/extlib";
+use local::lib "$Bin/lib";
 
 $ENV{HYPNOTOAD_STOP} = 1 if ($ARGV[0]//'') eq 'stop';
 use Mojo::Server::Hypnotoad;

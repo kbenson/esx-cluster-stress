@@ -4,6 +4,18 @@ Have perl.  Have cpanm.  have sqlite libs. Clone repo.
 
 Run ./setup.sh in repo to install required perl libs.
 
+For a system like RHEL/CentOS 7, that might be:
+
+    yum install perl
+    yum install perl-App-cpanminus
+    # cpanm will need to compile some stuff
+    yum groupinstall "Development Tools"
+    # The rest are because perl is really old on this system
+    yum install perl-ExtUtils-MakeMaker
+    yum install perl-Module-CoreList
+    yum install sqlite-devel
+    cd esx-cluster-stress; ./setup.sh
+
 # Configuration
 
 ## Controller VM
@@ -18,6 +30,7 @@ Note: If there are any worries about selinux, turn it off in the VMs.
       controller => 1,
     },
 3. Start manually or set to start at boot.
+4. Allow port 80 through firewall on VM if firewall enabled.
 
 ## Server template
 
@@ -31,7 +44,8 @@ Note: If there are any worries about selinux, turn it off in the VMs.
     controller => 'http://192.168.1.10',
     where the controller address has the IP to access the controller.
 3. Set to start at boot.
-4. Make esx-cluster-stress-server template from VM.
+4. Allow port 80 through firewall on VM if firewall enabled.
+5. Make esx-cluster-stress-server template from VM.
 
 ## Client template
 
@@ -45,7 +59,8 @@ Note: If there are any worries about selinux, turn it off in the VMs.
     controller => 'http://192.168.1.10',
    where the controller address has the IP to access the controller.
 3. Set to start at boot.
-4. Make esx-cluster-stress-client template from VM.
+4. Allow port 80 through firewall on VM if firewall enabled.
+5. Make esx-cluster-stress-server template from VM.
 
 # Running
 

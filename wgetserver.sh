@@ -1,2 +1,3 @@
-echo "Getting $1"
-echo "Finished $1" `wget -q -T 2 -O - "http://$1/digest" | wc`
+MYID="$RANDOM"
+echo "Getting[$MYID] $1 `date`"
+echo "Finished[$MYID] $1" `wget -q -T 2 -O - "http://$1/digest" | wc` `date`

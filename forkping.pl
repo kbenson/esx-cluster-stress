@@ -10,7 +10,8 @@ use List::MoreUtils qw(uniq);
 
 
 use constant TIMEOUT  => 1;
-use constant NUMSTATS => 10;
+#use constant NUMSTATS => 10;
+use constant NUMSTATS => 9999;
 
 my @targets = uniq @ARGV;
 die "Usage: $0 [HOST1] [HOST2] [...]" unless @targets;
@@ -43,7 +44,7 @@ while (sleep 1) {
         #my @data = map { [split m{/}] } grep {length} split /;/, $pingdata;
         my @data = pstr2data($pingdata);
         #say "$target: " . Dumper(\@data);
-        printf "%-40s %s\n", $target, summarize(\@data);
+        printf "%-30s %s\n", $target, summarize(\@data);
     }
 }
 exit;

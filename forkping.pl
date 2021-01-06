@@ -7,6 +7,7 @@ use IPC::ShareLite;
 use Data::Dumper;
 use Time::HiRes;
 use List::MoreUtils qw(uniq);
+$|=1;
 
 
 use constant TIMEOUT  => 1;
@@ -78,7 +79,7 @@ sub pdata2str {
 sub pingtarget {
     my $target = shift;
     warn "$$ In child for $target" if $ENV{DEBUG};
-    my $shm = IPC::ShareLite->new(-key=>$$, -create=>1, -destroy=>0);
+    my $shm = IPC::ShareLite->new(-key=>$$, -create=>1, -destroy=>1);
     require Net::Ping;
     my $p = Net::Ping->new('icmp');
     $p->hires(1);

@@ -25,23 +25,26 @@ my @threads;
 for my $server_addr ( @servers_list ) {
     warn "Adding shared data for server $server_addr" if $ENV{DEBUG};
     $servers_data{$server_addr} = shared_clone({ %base_stats, remote_addr=>$server_addr });
-    push @threads, threads->create(\&start_client, $server_addr);
+    push @threads, threads->create(\&client_thread, $server_addr);
 }
 
+sleep 1;
 while ( 1 ) {
-    warn "... starting report" if $ENV{DEBUG};
     my $start = Time::HiRes::time;
     say '#' x 40;
     say "Servers report for " . localtime;
     for my $server_addr ( @servers_list ) {
-        warn "... locking $server_addr" if $ENV{DEBUG};
-        my $lst = do { lock($servers_data{$server_addr}); $servers_data{$server_addr}{last_success} };
-        warn "... locked $server_addr" if $ENV{DEBUG};
+        my ($lst,$note);
+        {
+            lock($servers_data{$server_addr});
+            $lst = $servers_data{$server_addr}{last_success};
+            $note = $servers_data{$server_addr}{note} // '';
+        }
+        $note =~ s/\n/ /g;
         my $last_success = $lst ? sprintf("%0.2f seconds ago", Time::HiRes::time - $lst) : "NEVER";
-        warn "... reporting $server_addr" if $ENV{DEBUG};
-        say sprintf "  %-15s  succeeded as of %s", $server_addr, $last_success;
+        say sprintf "  %-15s  succeeded as of %s / %s", $server_addr, $last_success, $note;
     }
-    printf "Done reporting (%0.2fs elapsed)\n", Time::HiRes::time - $start;
+    printf "Done reporting (%0.2fs report time)\n", Time::HiRes::time - $start;
 
     my $last;
     { lock($QUIT); $last++ if $QUIT }
@@ -69,6 +72,28 @@ sub find_servers {
     return @servers;
 }
 
+sub client_thread {
+    my $server_addr = shift or die "No server addr passed";
+    while ( 1 ) {
+        warn "Starting client connection to $server_addr";
+        eval { start_client($server_addr); };
+        if ( my $err = $@ ) {
+            warn "Error server $server_addr: $err" if $ENV{DEBUG};
+            lock($servers_data{$server_addr});
+            $servers_data{$server_addr}{note} = $err;
+        }
+
+        my $done;
+        {
+            lock($QUIT);
+            $done++ if $QUIT;
+        }
+        return if $done;
+
+        sleep 1;
+    }
+}
+
 sub start_client {
     my $server_addr = shift or die "No server addr passed";
     my $server = IO::Socket::INET->new(
@@ -76,7 +101,7 @@ sub start_client {
         PeerPort    => 10001,
         Proto       =>'tcp',
         Type        => SOCK_STREAM,
-    ) or die "Error starting TCP server: $@";
+    ) or die "$@\n";
     my $banner = <$server>;
     die "Bad server banner: $banner" unless $banner =~ /^WELCOME/;
 
@@ -88,6 +113,10 @@ sub client_loop {
     my $server_addr = shift or die "No server_addr passed";
     my $count = 0;
     while (++$count) {
+        if ( not $server->connected ) {
+            warn "Server $server_addr disconnected";
+            return;
+        }
         my $time = localtime;
         my $send = "($count) " . localtime;
         $server->send("$send\n");
@@ -98,7 +127,7 @@ sub client_loop {
         }
         warn ",,, locked $server_addr" if $ENV{DEBUG};
 
-        my $recv = <$server>;
+        my $recv = <$server> //'';
         $recv =~ s/[\r\n]$//g;
         warn ",,, locking $server_addr" if $ENV{DEBUG};
         {

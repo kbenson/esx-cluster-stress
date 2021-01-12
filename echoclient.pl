@@ -64,7 +64,7 @@ sub find_servers {
     warn "Finding servers to use from $servers_url";
     my $response = LWP::UserAgent->new->get($servers_url);
     die "Error finding servers: " . $response->status_line unless $response->is_success;
-    my @servers = $response->decoded_content =~ /Server: ([\d.]+),/gsmi;
+    my @servers = $response->decoded_content =~ /IP: ([\d.]+),/gsmi;
     warn "Found servers: " . join ", ", @servers;
     return @servers;
 }

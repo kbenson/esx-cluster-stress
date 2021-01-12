@@ -20,7 +20,6 @@ my $QUIT :shared;
 $SIG{INT} = \&quit;
 my %base_stats = ( remote_addr=>'UNSET', last_send=>'UNSET', last_recv=>'UNSET', last_success=>undef, note=>'' );
 my @servers_list = sort (find_servers());
-use Data::Dumper; die Dumper \@servers_list;
 my %servers_data;
 my @threads;
 for my $server_addr ( @servers_list ) {
